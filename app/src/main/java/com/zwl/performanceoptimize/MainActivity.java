@@ -10,7 +10,7 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        CommUtil commUtil = CommUtil.getInstance(this);
+//        CommUtil commUtil = CommUtil.getInstance(this);
 
     }
 }
