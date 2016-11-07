@@ -1,0 +1,11 @@
+http://www.jianshu.com/p/c49f778e7acf
+
+1,任何情况下你在class中创建非静态内部类，内部类会（自动）拥有对当前类的一个强引用。
+一旦你把Runnable或者Message发送到Handler中，它就会被放入LooperThread的消息队列，
+并且被保持引用，直到Message被处理。发送postDelayed这样的消息，你输入延迟多少秒，
+它就会泄露至少多少秒。而发送没有延迟的消息的话，当队列中的消息过多时，也会照成一个临时的泄露。
+
+2,在Handler中使用postDelayed需要额外的注意，为了解决问题，我们有三种方法:
+  使用静态内部Handler/Runnable + 弱引用
+  在onDestory的时候，手动清除Message
+  使用Badoo开发的第三方的 WeakHandler
