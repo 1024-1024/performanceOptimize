@@ -1,4 +1,4 @@
-性能优化:
+一：性能优化:
 ==============================
 1,如何去优化自己现有的项目,运行更近流程
 app进程  16M,32M,64M
@@ -78,6 +78,147 @@ PhatomReference:虚引用
 
 //关于堆栈知识的地址:
 http://uule.iteye.com/blog/1417299
+
+==============================================================================
+二,电量优化
+    同步心跳包
+
+http://blog.chinaunix.net/uid-27411029-id-4040727.html
+1. wake lock 、 PowerManger
+    *
+        * Wake Lock是一种锁的机制，只要有人拿着这个锁，系统就无法进入休眠，可以被用户态程序和内核获得，这个锁可以是超时的或者是没有超时的，超时的锁会在时间过去以后自动解锁。如果没有锁了或者超时了，内核就会启动休眠的那套机制来进入休眠。第一种锁是永久的锁住，这样的锁除非显式的放开，否则不会解锁的，所以这种锁用起来非常的小心。第二种锁是超时锁，这种锁会锁住后一段时间解锁。在创建了PowerManager.wakelock后，有两种机制，第一种是不计数锁机制，另一种是计数锁机制。可以通过setReferenceConunted(boolen value)来指定，一般为默认计数机制。这两种机制的区别在于：前者无论acquire了多少次，只要通过一次release()即可解锁，而后者真正解锁是在（—count == 0）的时候，同样当（count == 0）的时候才会去申请枷锁。所以PowerManager.WakeLock的计数机制并不是正真意义上的对每次请求进行申请/释放每一把锁，它只是对同一把锁被申请/释放的次数进行了统计，然后再去操作。
+    * 要进行电源的操作需要在AndroidManifest.xml中声明该应用有设置电源管理权限
+    * <uses-permission android:name=“android.permission.WAKE_LOCK”/>你可能还需要<uses-permission android:name=“android.permission.DEVICE_POWER”/>另外wake lock的设置是activity级别的，不是针对整个application应用的
+    * PowerManager pm = (PowerManager)Context.getSystemService(Context.POWER_SERVICE);
+    * 通过PowerManger的newWakeLock(int flags, String tag)来生成WakeLock实例。int Flags指示要获取那种wakLock，不同的lock对cup、屏幕、键盘灯有不同影响
+    * 获取wakelock实例后通过acquire()获取相应的锁，然后进行其他业务逻辑操作，最后使用release()释放
+    * int flags 各种锁类型对cpu、屏幕、键盘的影响：
+        * partial_wake_lock:保持cpu运转，屏幕和键盘灯有可能是关闭的
+        * screen_dim_wake_lock:保持cpu运转，允许保持屏幕显示但有可能是灰的，允许关闭键盘灯
+        * screen_bright_wake_lock:保持cpu运转，允许保持屏幕亮显示，允许关闭键盘灯
+        * full_wake_lock:保持cpu运转，保持屏幕亮度显示，键盘灯也保持亮度
+        * acquire_causes_wakeup:正常唤醒锁实际上并不打开照明。相反，一旦打开他们会一直仍然保持。当获得wakelock，这个标志会使屏幕或/和键盘立即打开。一个典型的使用就是可以立即看到那些对用户重要的通知
+        * on_after_release:设置了这个标志，当wakelock释放时用户activity计时器会被重置，导致照明持续一段时间。如果你在wakelock条件中循环，这个可以用来减少闪烁。
+    * 另一种方式：
+    * getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+WakeLock levelAndFlags和使用场景
+
+Level	保持CPU	保持屏幕亮	保持键盘亮	使用场景
+PARTIAL_WAKE_LOCK	是	否	否	长时间运行的后台服务，例如Service等
+SCREEN_DIM_WAKE_LOCK	是	低亮度	否	除非必须保持CPU运行直至运算完成，否则请使用FLAG_KEEP_SCREEN_ON方式
+SCREEN_BRIGHT_WAKE_LOCK	是	高亮度	否	除非必须保持CPU运行直至运算完成，否则请使用FLAG_KEEP_SCREEN_ON方式
+FULL_WAKE_LOCK	是	高亮度	是	除非必须保持CPU运行直至运算完成，否则请使用FLAG_KEEP_SCREEN_ON方式
+除了这四个Level之外，PowerMager还提供了两个Flag，可以配合Level使用。
+
+FLAG	描述
+ACQUIRE_CAUSES_WAKEUP	默认情况下wake locks并不是马上开启CPU、Screen或者Keyboard的illumination（对于Screen是Dim或Bright，Keyboard是Bright. wake locks只是在被开启后（比如用户的活动），让设备延续（保存）你设定开启的状态. 但是如果加上ACQUIRE_CAUSES_WAKEUP就可以让Screen或Keyboard的illumination没开启的情况，马上开启它们。 典型的应用就是在收到一个重要的notifications时，需要马上点亮屏幕。
+ON_AFTER_RELEASE
+1. 当wake lock被释放的时候，当前调用wake lock的activity的计数器会被重置，所以屏幕会继续亮一段时间
+
+2.  alarm manager
+    1.
+一、概述：
+
+该类提供一种访问系统闹钟服务的方式，允许你去设置在将来的某个时间点去执行你的应用程序。当你的闹钟响起（时间到）时，在它上面注册的一个意图(Intent)将会被系统以广播发出，然后自动启动目标程序，如果它没有正在运行。注册的闹钟会被保留即使设备处于休眠中(如果闹钟在给定时间响起可以选择是否唤醒设备)。如果闹钟关闭或者重启，闹钟将被清除。
+
+只要广播的onReceive()方法正在执行，这闹钟管理者(AlarmManager)会持有一个CPU唤醒锁，这是为了保证手机不会休眠直到处理完该广播，一旦onReceive()返回，那么闹钟管理者将会释放唤醒锁。这意味着只要OnReceive()方法完成，你的手机可能在某些情况下进入休眠，如果你的闹钟广播接收者调用的是Context.startService()，那么手机有可能在被请求的服务执行之前进入休眠，为了防止这种情况，你的BroadcastReceiver和服务需要实现一个单独的唤醒锁策略以确保手机继续运行，直到服务可用。
+
+此处注意：该类适用于你想让应用程序在将来某个指定时间点执行的情况，即使你的应用程序现在没有运行。对一般的时间操作，使用Handler是更容易和更有效率的。
+
+二、公有方法(Public Methods)：
+
+void cancel(PendingIntent operation)
+
+取消AlarmManager的定时服务。
+
+void set(int type, long triggerAtTime, PendingIntent operation)
+
+设置在triggerAtTime时间启动由operation参数指定的组件。（该方法用于设置一次性闹钟）
+
+void setInexactRepeating(int type, long triggerAtTime, long interval, PendingIntent operation)
+
+设置一个非精确的周期性任务。
+
+void setRepeating(int type, long triggerAtTime, long interval, PendingIntent operation)
+
+设置一个周期性执行的定时服务。
+
+void setTime(long millis)
+
+设置系统“墙”时钟。需要android.permission.SET_TIME.权限。
+
+void setTimeZone(String timeZone)
+
+设置系统的默认时区。需要android.permission.SET_TIME_ZONE.权限。
+
+三、常用方法说明：
+AlarmManager的常用方法有三个：
+
+（1）
+
+set(int type,long startTime,PendingIntent pi)
+
+该方法用于设置一次性闹钟。
+第一个参数int type指定定时服务的类型，该参数接受如下值：
+
+ELAPSED_REALTIME： 在指定的延时过后，发送广播，但不唤醒设备（闹钟在睡眠状态下不可用）。如果在系统休眠时闹钟触发，它将不会被传递，直到下一次设备唤醒。
+
+ELAPSED_REALTIME_WAKEUP： 在指定的延时过后，发送广播，并唤醒设备（即使关机也会执行operation所对应的组件） 。
+延时是要把系统启动的时间SystemClock.elapsedRealtime()算进去的，具体用法看代码。
+
+RTC： 指定当系统调用System.currentTimeMillis()方法返回的值与triggerAtTime相等时启动operation所对应的设备（在指定的时刻，发送广播，但不唤醒设备）。如果在系统休眠时闹钟触发，它将不会被传递，直到下一次设备唤醒（闹钟在睡眠状态下不可用）。
+
+RTC_WAKEUP： 指定当系统调用System.currentTimeMillis()方法返回的值与triggerAtTime相等时启动operation所对应的设备（在指定的时刻，发送广播，并唤醒设备）。即使系统关机也会执行 operation所对应的组件。
+
+第二个参数表示闹钟执行时间。
+
+第三个参数PendingIntent pi表示闹钟响应动作：
+
+PendingIntent pi：是闹钟的执行动作，比如发送一个广播、给出提示等等。PendingIntent是Intent的封装类。需要注意的是，如果是通过启动服务来实现闹钟提示的话，PendingIntent对象的获取就应该采用Pending.getService(Context c,int i,Intentintent,int j)方法；如果是通过广播来实现闹钟提示的话，PendingIntent对象的获取就应该采用PendingIntent.getBroadcast(Context c,inti,Intent intent,int j)方法；如果是采用Activity的方式来实现闹钟提示的话，PendingIntent对象的获取就应该采用PendingIntent.getActivity(Context c,inti,Intent intent,int j)方法。如果这三种方法错用了的话，虽然不会报错，但是看不到闹钟提示效果。
+
+（2）
+
+setRepeating(int type,long startTime,long intervalTime,PendingIntent pi)
+
+设置一个周期性执行的定时服务。第一个参数表示闹钟类型，第二个参数表示闹钟首次执行时间，第三个参数表示闹钟两次执行的间隔时间，第三个参数表示闹钟响应动作。
+
+（3）
+
+setInexactRepeating(int type,long startTime,long intervalTime,PendingIntent pi)
+
+该方法也用于设置重复闹钟，与第二个方法相似，不过其两个闹钟执行的间隔时间不是固定的而已。它相对而言更省电（power-efficient）一些，因为系统可能会将几个差不多的闹钟合并为一个来执行，减少设备的唤醒次数。第三个参数intervalTime为闹钟间隔，内置的几个变量如下：
+
+INTERVAL_DAY：      设置闹钟，间隔一天
+INTERVAL_HALF_DAY：  设置闹钟，间隔半天
+INTERVAL_FIFTEEN_MINUTES：设置闹钟，间隔15分钟
+INTERVAL_HALF_HOUR：     设置闹钟，间隔半个小时
+INTERVAL_HOUR：  设置闹钟，间隔一个小时
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
